@@ -44,6 +44,7 @@ function Get-IntuneDevices {
         $uri = "https://graph.microsoft.com/beta/deviceManagement/managedDevices"
         $allDevices = @()
         $deviceCount = 0
+        $maxDevices = 50000  # Safety limit
         
         do {
             $devices = Invoke-MgGraphRequest -Uri $uri -Method GET -ErrorAction Stop
@@ -55,6 +56,12 @@ function Get-IntuneDevices {
             # Add safety check for large environments
             if ($deviceCount -gt 10000) {
                 Write-Host "Warning: Large number of devices detected. Consider implementing pagination limits." -ForegroundColor Yellow
+            }
+            
+            # Safety limit to prevent memory issues
+            if ($deviceCount -gt $maxDevices) {
+                Write-Host "Warning: Reached maximum device limit ($maxDevices). Stopping retrieval." -ForegroundColor Yellow
+                break
             }
         } while ($uri)
         
@@ -112,8 +119,7 @@ if ($serialDuplicates) {
     
     # Export serial number duplicates to CSV
     $serialDuplicateDevices = $serialDuplicates | ForEach-Object { $_.Group } | Select-Object deviceName, serialNumber, model, manufacturer, operatingSystem, osVersion, userPrincipalName, lastSyncDateTime, enrolledDateTime, id
-    $serialDuplicateDevices | Export-Csv -Path "$outputFolder\DuplicateSerialNumbers.csv" -NoTypeInformation
-    Write-Host "Exported serial number duplicates to $outputFolder\DuplicateSerialNumbers.csv" -ForegroundColor Green
+    Export-CsvSafely -Data $serialDuplicateDevices -Path "$outputFolder\DuplicateSerialNumbers.csv" -Description "serial number duplicates"
 } else {
     Write-Host "No duplicate serial numbers found." -ForegroundColor Green
 }
@@ -132,16 +138,13 @@ if ($nameDuplicates) {
     
     # Export device name duplicates to CSV
     $nameDuplicateDevices = $nameDuplicates | ForEach-Object { $_.Group } | Select-Object deviceName, serialNumber, model, manufacturer, operatingSystem, osVersion, userPrincipalName, lastSyncDateTime, enrolledDateTime, id
-    $nameDuplicateDevices | Export-Csv -Path "$outputFolder\DuplicateDeviceNames.csv" -NoTypeInformation
-    Write-Host "Exported device name duplicates to $outputFolder\DuplicateDeviceNames.csv" -ForegroundColor Green
+    Export-CsvSafely -Data $nameDuplicateDevices -Path "$outputFolder\DuplicateDeviceNames.csv" -Description "device name duplicates"
 } else {
     Write-Host "No duplicate device names found." -ForegroundColor Green
 }
 
 # Export all devices for reference
-$devices | Select-Object deviceName, serialNumber, model, manufacturer, operatingSystem, osVersion, userPrincipalName, lastSyncDateTime, enrolledDateTime, id |
-    Export-Csv -Path "$outputFolder\AllDevices.csv" -NoTypeInformation
-Write-Host "Exported all devices to $outputFolder\AllDevices.csv" -ForegroundColor Green
+Export-CsvSafely -Data ($devices | Select-Object deviceName, serialNumber, model, manufacturer, operatingSystem, osVersion, userPrincipalName, lastSyncDateTime, enrolledDateTime, id) -Path "$outputFolder\AllDevices.csv" -Description "all devices"
 
 # Find devices with missing serial numbers
 Write-Host "Checking for devices with missing serial numbers..." -ForegroundColor Yellow
@@ -153,9 +156,7 @@ if ($noSerialDevices) {
     Write-Host "Found $noSerialCount devices with missing serial numbers!" -ForegroundColor Red
     
     # Export devices with no serial number to CSV
-    $noSerialDevices | Select-Object deviceName, id, model, manufacturer, operatingSystem, osVersion, userPrincipalName, lastSyncDateTime, enrolledDateTime |
-        Export-Csv -Path "$outputFolder\DevicesWithNoSerialNumber.csv" -NoTypeInformation
-    Write-Host "Exported devices with no serial number to $outputFolder\DevicesWithNoSerialNumber.csv" -ForegroundColor Green
+    Export-CsvSafely -Data ($noSerialDevices | Select-Object deviceName, id, model, manufacturer, operatingSystem, osVersion, userPrincipalName, lastSyncDateTime, enrolledDateTime) -Path "$outputFolder\DevicesWithNoSerialNumber.csv" -Description "devices with no serial number"
 } else {
     Write-Host "No devices with missing serial numbers found." -ForegroundColor Green
 }
@@ -184,8 +185,7 @@ if ($userDevices) {
         $_.Group | Add-Member -MemberType NoteProperty -Name "DeviceCount" -Value $_.Count -PassThru
     } | Select-Object deviceName, serialNumber, model, manufacturer, operatingSystem, osVersion, userPrincipalName, DeviceCount, lastSyncDateTime, enrolledDateTime, id
     
-    $multiUserDevices | Export-Csv -Path "$outputFolder\UsersWithMultipleDevices.csv" -NoTypeInformation
-    Write-Host "Exported users with multiple devices to $outputFolder\UsersWithMultipleDevices.csv" -ForegroundColor Green
+    Export-CsvSafely -Data $multiUserDevices -Path "$outputFolder\UsersWithMultipleDevices.csv" -Description "users with multiple devices"
 } else {
     Write-Host "No users with multiple devices found." -ForegroundColor Green
 }
@@ -205,3 +205,23 @@ Disconnect-MgGraph | Out-Null
 Write-Host "Disconnected from Microsoft Graph" -ForegroundColor Gray
 
 Write-Host "`nScript completed successfully!" -ForegroundColor Green
+
+# Function to safely export CSV
+function Export-CsvSafely {
+    param(
+        [Parameter(Mandatory=$true)]
+        $Data,
+        [Parameter(Mandatory=$true)]
+        [string]$Path,
+        [string]$Description
+    )
+    
+    try {
+        $Data | Export-Csv -Path $Path -NoTypeInformation -ErrorAction Stop
+        Write-Host "Exported $Description to $Path" -ForegroundColor Green
+        return $true
+    } catch {
+        Write-Host "Error exporting $Description to $Path : $_" -ForegroundColor Red
+        return $false
+    }
+}

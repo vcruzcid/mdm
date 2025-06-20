@@ -78,6 +78,13 @@ function Validate-CsvFile {
     
     try {
         $csv = Import-Csv $FilePath -ErrorAction Stop
+        
+        # Check if CSV has data
+        if ($csv.Count -eq 0) {
+            Write-Warning "CSV file $FilePath is empty."
+            return $false
+        }
+        
         $requiredColumns = @('deviceName', 'id')
         $csvColumns = $csv[0].PSObject.Properties.Name
         
@@ -186,11 +193,17 @@ function Take-ActionOnDevices {
                 }
             }
             if ($delete) {
-                # Add confirmation for delete action
-                Write-Host "Deleting device: $($device.deviceName) (ID: $($device.id))" -ForegroundColor Red
-                Remove-MgDeviceManagementManagedDevice -ManagedDeviceId $device.id -Confirm:$false -ErrorAction Stop
-                $result.ActionTaken += "Deleted "
-                $result.Status = "Success"
+                try {
+                    # Add confirmation for delete action
+                    Write-Host "Deleting device: $($device.deviceName) (ID: $($device.id))" -ForegroundColor Red
+                    Remove-MgDeviceManagementManagedDevice -ManagedDeviceId $device.id -Confirm:$false -ErrorAction Stop
+                    $result.ActionTaken += "Deleted "
+                    $result.Status = "Success"
+                } catch {
+                    $err = "Delete failed for device $($device.deviceName) (ID: $($device.id)): $_"
+                    $result.Status = "Failed to Delete"
+                    Add-Content -Path $logPath -Value $err
+                }
             }
         } else {
             $result.ActionTaken = "Dry-run: Would Retire/Delete"
