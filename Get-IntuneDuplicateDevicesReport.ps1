@@ -37,6 +37,26 @@ try {
     exit 1
 }
 
+# Function to safely export CSV
+function Export-CsvSafely {
+    param(
+        [Parameter(Mandatory=$true)]
+        $Data,
+        [Parameter(Mandatory=$true)]
+        [string]$Path,
+        [string]$Description
+    )
+    
+    try {
+        $Data | Export-Csv -Path $Path -NoTypeInformation -ErrorAction Stop
+        Write-Host "Exported $Description to $Path" -ForegroundColor Green
+        return $true
+    } catch {
+        Write-Host "Error exporting $Description to $Path : $_" -ForegroundColor Red
+        return $false
+    }
+}
+
 # Function to get all devices from Intune
 function Get-IntuneDevices {
     try {
@@ -83,12 +103,36 @@ if ($null -eq $devices -or $devices.Count -eq 0) {
 }
 
 # Validate that devices have expected properties
-$sampleDevice = $devices[0]
-$requiredProperties = @('deviceName', 'serialNumber', 'id')
-foreach ($prop in $requiredProperties) {
-    if (-not $sampleDevice.PSObject.Properties.Name.Contains($prop)) {
-        Write-Host "Error: Device data missing required property '$prop'. Exiting script." -ForegroundColor Red
-        exit 1
+$devicesWithMissingId = @()
+$devicesWithMissingName = @()
+$devicesWithMissingSerial = @()
+
+foreach ($device in $devices) {
+    if (-not $device.id) {
+        $devicesWithMissingId += $device
+    }
+    if (-not $device.deviceName) {
+        $devicesWithMissingName += $device
+    }
+    if (-not $device.serialNumber) {
+        $devicesWithMissingSerial += $device
+    }
+}
+
+if ($devicesWithMissingId.Count -gt 0) {
+    Write-Host "Error: $($devicesWithMissingId.Count) device object(s) are missing the critical 'id' property. This may be due to an API issue or unexpected data format. Exiting script." -ForegroundColor Red
+    Write-Host "Here is the first object that was missing the 'id' property:"
+    $devicesWithMissingId[0] | Format-List | Out-String | Write-Host
+    exit 1
+}
+
+if ($devicesWithMissingName.Count -gt 0 -or $devicesWithMissingSerial.Count -gt 0) {
+    Write-Host "Warning: Found some devices with missing property values. This may affect duplicate detection." -ForegroundColor Yellow
+    if ($devicesWithMissingName.Count -gt 0) {
+        Write-Host "- $($devicesWithMissingName.Count) devices are missing a 'deviceName' value." -ForegroundColor Yellow
+    }
+    if ($devicesWithMissingSerial.Count -gt 0) {
+        Write-Host "- $($devicesWithMissingSerial.Count) devices are missing a 'serialNumber' value." -ForegroundColor Yellow
     }
 }
 
