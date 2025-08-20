@@ -2,6 +2,11 @@
 # This script connects to Microsoft Graph API and identifies potential duplicate devices
 # Prerequisites: Install-Module Microsoft.Graph.Intune, Microsoft.Graph.Authentication
 
+param(
+    [Parameter(Mandatory=$false)]
+    [string]$OutputFolder
+)
+
 # Install required modules if not already installed
 try {
     if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Intune)) {
@@ -13,6 +18,11 @@ try {
         Write-Host "Installing Microsoft Graph Authentication module..." -ForegroundColor Yellow
         Install-Module -Name Microsoft.Graph.Authentication -Force -Scope CurrentUser -ErrorAction Stop
     }
+
+    if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.DeviceManagement)) {
+        Write-Host "Installing Microsoft Graph DeviceManagement module..." -ForegroundColor Yellow
+        Install-Module -Name Microsoft.Graph.DeviceManagement -Force -Scope CurrentUser -ErrorAction Stop
+    }
 } catch {
     Write-Warning "Error installing required modules: $_"
 }
@@ -21,6 +31,7 @@ try {
 try {
     Import-Module Microsoft.Graph.Intune -ErrorAction Stop
     Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+    Import-Module Microsoft.Graph.DeviceManagement -ErrorAction Stop
 } catch {
     Write-Warning "Error importing required modules: $_"
 }
@@ -58,32 +69,9 @@ try {
 function Get-IntuneDevices {
     try {
         Write-Host "Retrieving all devices from Intune..." -ForegroundColor Cyan
-        $uri = "https://graph.microsoft.com/beta/deviceManagement/managedDevices"
-        $allDevices = @()
-        $deviceCount = 0
-        $maxDevices = 50000  # Safety limit
-        
-        do {
-            $devices = Invoke-MgGraphRequest -Uri $uri -Method GET -ErrorAction Stop
-            $uri = $devices.'@odata.nextLink'
-            $allDevices += $devices.value
-            $deviceCount = $allDevices.Count
-            Write-Host "Retrieved $deviceCount devices so far..." -ForegroundColor Gray
-            
-            # Add safety check for large environments
-            if ($deviceCount -gt 10000) {
-                Write-Host "Warning: Large number of devices detected. Consider implementing pagination limits." -ForegroundColor Yellow
-            }
-            
-            # Safety limit to prevent memory issues
-            if ($deviceCount -gt $maxDevices) {
-                Write-Host "Warning: Reached maximum device limit ($maxDevices). Stopping retrieval." -ForegroundColor Yellow
-                break
-            }
-        } while ($uri)
-        
-        Write-Host "Successfully retrieved $deviceCount devices" -ForegroundColor Green
-        return $allDevices
+        $devices = Get-MgDeviceManagementManagedDevice -All
+        Write-Host "Successfully retrieved $($devices.Count) devices" -ForegroundColor Green
+        return $devices
     } catch {
         Write-Host "Error retrieving devices: $_" -ForegroundColor Red
         return $null
@@ -133,57 +121,44 @@ if ($devicesWithMissingName.Count -gt 0 -or $devicesWithMissingSerial.Count -gt 
 }
 
 # Create an output folder for reports
-$timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$outputFolder = Join-Path (Get-Location) "IntuneDeviceReports-$timestamp"
+if (-not $OutputFolder) {
+    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $OutputFolder = Join-Path (Get-Location) "IntuneDeviceReports-$timestamp"
+}
+
 try {
-    New-Item -ItemType Directory -Path $outputFolder -Force -ErrorAction Stop | Out-Null
+    if (-not (Test-Path -Path $OutputFolder)) {
+        New-Item -ItemType Directory -Path $OutputFolder -Force -ErrorAction Stop | Out-Null
+    }
 } catch {
     Write-Warning "Error creating output folder: $_"
 }
 
 Write-Host "Analyzing devices for potential duplicates..." -ForegroundColor Cyan
 
-# Find duplicates by Serial Number (ignoring empty serial numbers)
-Write-Host "Checking for duplicate serial numbers..." -ForegroundColor Yellow
-$serialDuplicates = $devices | 
-    Where-Object { $_.serialNumber -and $_.serialNumber -ne "" } |
-    Group-Object -Property serialNumber | 
+# Find duplicates by Device Name and Serial Number (ignoring empty serial numbers)
+Write-Host "Checking for duplicate Device Name and Serial Number..." -ForegroundColor Yellow
+$combinedDuplicates = $devices | 
+    Where-Object { $_.serialNumber -and $_.serialNumber -ne "" -and $_.deviceName -and $_.deviceName -ne "" } |
+    Group-Object -Property deviceName, serialNumber | 
     Where-Object { $_.Count -gt 1 }
 
-if ($serialDuplicates) {
-    Write-Host "Found $($serialDuplicates.Count) duplicate serial numbers!" -ForegroundColor Red
-    $serialDuplicates | ForEach-Object {
-        Write-Host "Serial Number: $($_.Name) - $($_.Count) devices" -ForegroundColor Red
+if ($combinedDuplicates) {
+    Write-Host "Found $($combinedDuplicates.Count) duplicate device name and serial number combinations!" -ForegroundColor Red
+    $combinedDuplicates | ForEach-Object {
+        $firstItem = $_.Group[0]
+        Write-Host "Device Name: $($firstItem.deviceName), Serial Number: $($firstItem.serialNumber) - $($_.Count) devices" -ForegroundColor Red
     }
     
-    # Export serial number duplicates to CSV
-    $serialDuplicateDevices = $serialDuplicates | ForEach-Object { $_.Group } | Select-Object deviceName, serialNumber, model, manufacturer, operatingSystem, osVersion, userPrincipalName, lastSyncDateTime, enrolledDateTime, id
-    Export-CsvSafely -Data $serialDuplicateDevices -Path "$outputFolder\DuplicateSerialNumbers.csv" -Description "serial number duplicates"
+    # Export combined duplicates to CSV
+    $combinedDuplicateDevices = $combinedDuplicates | ForEach-Object { $_.Group } | Select-Object deviceName, serialNumber, model, manufacturer, operatingSystem, osVersion, userPrincipalName, lastSyncDateTime, enrolledDateTime, id
+    Export-CsvSafely -Data $combinedDuplicateDevices -Path "$OutputFolder\DuplicateDeviceNameAndSerial.csv" -Description "device name and serial number duplicates"
 } else {
-    Write-Host "No duplicate serial numbers found." -ForegroundColor Green
-}
-
-# Find duplicates by Device Name
-Write-Host "Checking for duplicate device names..." -ForegroundColor Yellow
-$nameDuplicates = $devices | 
-    Group-Object -Property deviceName | 
-    Where-Object { $_.Count -gt 1 }
-
-if ($nameDuplicates) {
-    Write-Host "Found $($nameDuplicates.Count) duplicate device names!" -ForegroundColor Red
-    $nameDuplicates | ForEach-Object {
-        Write-Host "Device Name: $($_.Name) - $($_.Count) devices" -ForegroundColor Red
-    }
-    
-    # Export device name duplicates to CSV
-    $nameDuplicateDevices = $nameDuplicates | ForEach-Object { $_.Group } | Select-Object deviceName, serialNumber, model, manufacturer, operatingSystem, osVersion, userPrincipalName, lastSyncDateTime, enrolledDateTime, id
-    Export-CsvSafely -Data $nameDuplicateDevices -Path "$outputFolder\DuplicateDeviceNames.csv" -Description "device name duplicates"
-} else {
-    Write-Host "No duplicate device names found." -ForegroundColor Green
+    Write-Host "No duplicate device name and serial number combinations found." -ForegroundColor Green
 }
 
 # Export all devices for reference
-Export-CsvSafely -Data ($devices | Select-Object deviceName, serialNumber, model, manufacturer, operatingSystem, osVersion, userPrincipalName, lastSyncDateTime, enrolledDateTime, id) -Path "$outputFolder\AllDevices.csv" -Description "all devices"
+Export-CsvSafely -Data ($devices | Select-Object deviceName, serialNumber, model, manufacturer, operatingSystem, osVersion, userPrincipalName, lastSyncDateTime, enrolledDateTime, id) -Path "$OutputFolder\AllDevices.csv" -Description "all devices"
 
 # Find devices with missing serial numbers
 Write-Host "Checking for devices with missing serial numbers..." -ForegroundColor Yellow
@@ -195,7 +170,7 @@ if ($noSerialDevices) {
     Write-Host "Found $noSerialCount devices with missing serial numbers!" -ForegroundColor Red
     
     # Export devices with no serial number to CSV
-    Export-CsvSafely -Data ($noSerialDevices | Select-Object deviceName, id, model, manufacturer, operatingSystem, osVersion, userPrincipalName, lastSyncDateTime, enrolledDateTime) -Path "$outputFolder\DevicesWithNoSerialNumber.csv" -Description "devices with no serial number"
+    Export-CsvSafely -Data ($noSerialDevices | Select-Object deviceName, id, model, manufacturer, operatingSystem, osVersion, userPrincipalName, lastSyncDateTime, enrolledDateTime) -Path "$OutputFolder\DevicesWithNoSerialNumber.csv" -Description "devices with no serial number"
 } else {
     Write-Host "No devices with missing serial numbers found." -ForegroundColor Green
 }
@@ -224,7 +199,7 @@ if ($userDevices) {
         $_.Group | Add-Member -MemberType NoteProperty -Name "DeviceCount" -Value $_.Count -PassThru
     } | Select-Object deviceName, serialNumber, model, manufacturer, operatingSystem, osVersion, userPrincipalName, DeviceCount, lastSyncDateTime, enrolledDateTime, id
     
-    Export-CsvSafely -Data $multiUserDevices -Path "$outputFolder\UsersWithMultipleDevices.csv" -Description "users with multiple devices"
+    Export-CsvSafely -Data $multiUserDevices -Path "$OutputFolder\UsersWithMultipleDevices.csv" -Description "users with multiple devices"
 } else {
     Write-Host "No users with multiple devices found." -ForegroundColor Green
 }
@@ -232,11 +207,10 @@ if ($userDevices) {
 # Summary
 Write-Host "`n===== SUMMARY =====" -ForegroundColor Cyan
 Write-Host "Total devices: $($devices.Count)" -ForegroundColor White
-Write-Host "Devices with duplicate serial numbers: $(if ($serialDuplicates) { $serialDuplicates.Count } else { 0 })" -ForegroundColor White
-Write-Host "Devices with duplicate names: $(if ($nameDuplicates) { $nameDuplicates.Count } else { 0 })" -ForegroundColor White
+Write-Host "Devices with duplicate name and serial number: $(if ($combinedDuplicates) { $combinedDuplicates.Count } else { 0 })" -ForegroundColor White
 Write-Host "Devices with missing serial numbers: $(if ($noSerialDevices) { $noSerialDevices.Count } else { 0 })" -ForegroundColor White
 Write-Host "Users with multiple devices: $(if ($userDevices) { $userDevices.Count } else { 0 })" -ForegroundColor White
-Write-Host "All reports saved to: $outputFolder" -ForegroundColor Green
+Write-Host "All reports saved to: $OutputFolder" -ForegroundColor Green
 Write-Host "===================" -ForegroundColor Cyan
 
 # Disconnect from Microsoft Graph

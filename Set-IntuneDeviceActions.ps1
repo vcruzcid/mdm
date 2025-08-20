@@ -8,6 +8,9 @@ param(
     [Parameter(Mandatory=$false)]
     [string[]]$InputFiles,
 
+    [Parameter(Mandatory=$false)]
+    [string]$OutputFolder,
+
     [switch]$Retire,
     [switch]$Delete,
     [switch]$WhatIf
@@ -148,14 +151,21 @@ function Take-ActionOnDevices {
         $devices,
         $retire,
         $delete,
-        $dryRun
+        $dryRun,
+        $OutputFolder
     )
 
-    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-    $outputFolder = ".\RetireResults-$timestamp"
-    New-Item -ItemType Directory -Path $outputFolder -Force | Out-Null
+    if (-not $OutputFolder) {
+        $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+        $OutputFolder = ".\RetireResults-$timestamp"
+    }
+
+    if (-not (Test-Path -Path $OutputFolder)) {
+        New-Item -ItemType Directory -Path $OutputFolder -Force | Out-Null
+    }
+    
     $results = @()
-    $logPath = Join-Path $outputFolder 'ActionErrors.log'
+    $logPath = Join-Path $OutputFolder 'ActionErrors.log'
 
     foreach ($device in $devices) {
         $info = Get-DeviceInfo -id $device.id
@@ -215,8 +225,8 @@ function Take-ActionOnDevices {
         $results += $result
     }
 
-    $results | Export-Csv -Path (Join-Path $outputFolder 'Results.csv') -NoTypeInformation
-    Write-Host "Results saved to $outputFolder\Results.csv" -ForegroundColor Green
+    $results | Export-Csv -Path (Join-Path $OutputFolder 'Results.csv') -NoTypeInformation
+    Write-Host "Results saved to $OutputFolder\Results.csv" -ForegroundColor Green
     if (Test-Path $logPath) {
         Write-Host "Some actions failed. See log: $logPath" -ForegroundColor Yellow
     }
@@ -282,6 +292,6 @@ if (-not $WhatIf) {
     }
 }
 
-Take-ActionOnDevices -devices $preview -retire:$Retire -delete:$Delete -dryRun:(!$Retire -and !$Delete -or $WhatIf)
+Take-ActionOnDevices -devices $preview -retire:$Retire -delete:$Delete -dryRun:(!$Retire -and !$Delete -or $WhatIf) -OutputFolder $OutputFolder
 
 Disconnect-MgGraph | Out-Null
