@@ -232,6 +232,8 @@ $validFiles = @()
 foreach ($file in $files) {
     if (Validate-CsvFile -FilePath $file) {
         $validFiles += $file
+    } else {
+        Write-Warning "Skipping invalid CSV file: $file"
     }
 }
 
@@ -242,7 +244,11 @@ if ($validFiles.Count -eq 0) {
 
 $rawDevices = @()
 foreach ($file in $validFiles) {
-    $rawDevices += Import-Csv $file
+    try {
+        $rawDevices += Import-Csv $file -ErrorAction Stop
+    } catch {
+        Write-Warning "Failed to import CSV file '$file': $_"
+    }
 }
 $rawDevices = $rawDevices | Sort-Object -Property deviceName -Unique
 

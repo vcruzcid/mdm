@@ -14,8 +14,7 @@ try {
         Install-Module -Name Microsoft.Graph.Authentication -Force -Scope CurrentUser -ErrorAction Stop
     }
 } catch {
-    Write-Host "Error installing required modules: $_" -ForegroundColor Red
-    exit 1
+    Write-Warning "Error installing required modules: $_"
 }
 
 # Import modules
@@ -23,8 +22,7 @@ try {
     Import-Module Microsoft.Graph.Intune -ErrorAction Stop
     Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
 } catch {
-    Write-Host "Error importing required modules: $_" -ForegroundColor Red
-    exit 1
+    Write-Warning "Error importing required modules: $_"
 }
 
 # Function to safely export CSV
@@ -53,8 +51,7 @@ try {
     Connect-MgGraph -Scopes "Device.Read.All", "DeviceManagementManagedDevices.Read.All"
     Write-Host "Connected successfully!" -ForegroundColor Green
 } catch {
-    Write-Host "Error connecting to Microsoft Graph: $_" -ForegroundColor Red
-    exit 1
+    Write-Warning "Error connecting to Microsoft Graph: $_"
 }
 
 # Function to get all devices from Intune
@@ -98,8 +95,7 @@ $devices = Get-IntuneDevices
 
 # Validate devices data
 if ($null -eq $devices -or $devices.Count -eq 0) {
-    Write-Host "No devices found or error occurred. Exiting script." -ForegroundColor Red
-    exit 1
+    Write-Warning "No devices found or error occurred. Exiting script."
 }
 
 # Validate that devices have expected properties
@@ -142,8 +138,7 @@ $outputFolder = Join-Path (Get-Location) "IntuneDeviceReports-$timestamp"
 try {
     New-Item -ItemType Directory -Path $outputFolder -Force -ErrorAction Stop | Out-Null
 } catch {
-    Write-Host "Error creating output folder: $_" -ForegroundColor Red
-    exit 1
+    Write-Warning "Error creating output folder: $_"
 }
 
 Write-Host "Analyzing devices for potential duplicates..." -ForegroundColor Cyan
