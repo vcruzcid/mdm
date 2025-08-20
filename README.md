@@ -160,8 +160,8 @@ RetireResults-YYYYMMDD-HHMMSS/
 ### Error Handling
 - Scripts provide detailed error messages
 - Failed operations are logged to error files
-- Scripts exit gracefully on critical errors
-- CSV validation prevents processing invalid files
+- Scripts are designed to be resilient and will not exit on non-critical errors (e.g., invalid CSV files or individual device failures)
+- CSV validation prevents processing of invalid files, but the script will continue with any valid files that are found
 
 ## 🔍 Troubleshooting
 

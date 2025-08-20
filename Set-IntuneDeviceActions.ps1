@@ -188,6 +188,7 @@ function Take-ActionOnDevices {
                     $result.Status = "Success"
                 } catch {
                     $err = "Retire failed for device $($device.deviceName) (ID: $($device.id)): $_"
+                    Write-Warning $err
                     $result.Status = "Failed to Retire"
                     Add-Content -Path $logPath -Value $err
                 }
@@ -201,6 +202,7 @@ function Take-ActionOnDevices {
                     $result.Status = "Success"
                 } catch {
                     $err = "Delete failed for device $($device.deviceName) (ID: $($device.id)): $_"
+                    Write-Warning $err
                     $result.Status = "Failed to Delete"
                     Add-Content -Path $logPath -Value $err
                 }
@@ -226,14 +228,20 @@ Connect-Graph
 $files = Load-InputFiles
 
 # Validate all CSV files before processing
+$validFiles = @()
 foreach ($file in $files) {
-    if (-not (Validate-CsvFile -FilePath $file)) {
-        exit 1
+    if (Validate-CsvFile -FilePath $file) {
+        $validFiles += $file
     }
 }
 
+if ($validFiles.Count -eq 0) {
+    Write-Error "No valid CSV files found."
+    exit 1
+}
+
 $rawDevices = @()
-foreach ($file in $files) {
+foreach ($file in $validFiles) {
     $rawDevices += Import-Csv $file
 }
 $rawDevices = $rawDevices | Sort-Object -Property deviceName -Unique

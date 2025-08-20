@@ -27,16 +27,6 @@ try {
     exit 1
 }
 
-# Connect to Microsoft Graph
-try {
-    Write-Host "Connecting to Microsoft Graph..." -ForegroundColor Cyan
-    Connect-MgGraph -Scopes "Device.Read.All", "DeviceManagementManagedDevices.Read.All"
-    Write-Host "Connected successfully!" -ForegroundColor Green
-} catch {
-    Write-Host "Error connecting to Microsoft Graph: $_" -ForegroundColor Red
-    exit 1
-}
-
 # Function to safely export CSV
 function Export-CsvSafely {
     param(
@@ -55,6 +45,16 @@ function Export-CsvSafely {
         Write-Host "Error exporting $Description to $Path : $_" -ForegroundColor Red
         return $false
     }
+}
+
+# Connect to Microsoft Graph
+try {
+    Write-Host "Connecting to Microsoft Graph..." -ForegroundColor Cyan
+    Connect-MgGraph -Scopes "Device.Read.All", "DeviceManagementManagedDevices.Read.All"
+    Write-Host "Connected successfully!" -ForegroundColor Green
+} catch {
+    Write-Host "Error connecting to Microsoft Graph: $_" -ForegroundColor Red
+    exit 1
 }
 
 # Function to get all devices from Intune
@@ -120,10 +120,10 @@ foreach ($device in $devices) {
 }
 
 if ($devicesWithMissingId.Count -gt 0) {
-    Write-Host "Error: $($devicesWithMissingId.Count) device object(s) are missing the critical 'id' property. This may be due to an API issue or unexpected data format. Exiting script." -ForegroundColor Red
+    Write-Host "Warning: $($devicesWithMissingId.Count) device object(s) are missing the critical 'id' property. This may be due to an API issue or unexpected data format. These devices will be skipped." -ForegroundColor Yellow
     Write-Host "Here is the first object that was missing the 'id' property:"
     $devicesWithMissingId[0] | Format-List | Out-String | Write-Host
-    exit 1
+    $devices = $devices | Where-Object { $_.id }
 }
 
 if ($devicesWithMissingName.Count -gt 0 -or $devicesWithMissingSerial.Count -gt 0) {
@@ -249,23 +249,3 @@ Disconnect-MgGraph | Out-Null
 Write-Host "Disconnected from Microsoft Graph" -ForegroundColor Gray
 
 Write-Host "`nScript completed successfully!" -ForegroundColor Green
-
-# Function to safely export CSV
-function Export-CsvSafely {
-    param(
-        [Parameter(Mandatory=$true)]
-        $Data,
-        [Parameter(Mandatory=$true)]
-        [string]$Path,
-        [string]$Description
-    )
-    
-    try {
-        $Data | Export-Csv -Path $Path -NoTypeInformation -ErrorAction Stop
-        Write-Host "Exported $Description to $Path" -ForegroundColor Green
-        return $true
-    } catch {
-        Write-Host "Error exporting $Description to $Path : $_" -ForegroundColor Red
-        return $false
-    }
-}
