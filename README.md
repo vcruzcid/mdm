@@ -75,6 +75,8 @@ cd EBF
 - `UsersWithMultipleDevices.csv` - Users with multiple devices
 - `AllDevices.csv` - Complete device inventory
 
+*All generated CSV files now include a `complianceState` column to provide at-a-glance compliance information.*
+
 **Features**:
 - Automatic pagination for large environments
 - Memory safety limits (50,000 devices max)

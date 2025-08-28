@@ -136,29 +136,51 @@ try {
 
 Write-Host "Analyzing devices for potential duplicates..." -ForegroundColor Cyan
 
-# Find duplicates by Device Name and Serial Number (ignoring empty serial numbers)
-Write-Host "Checking for duplicate Device Name and Serial Number..." -ForegroundColor Yellow
-$combinedDuplicates = $devices | 
-    Where-Object { $_.serialNumber -and $_.serialNumber -ne "" -and $_.deviceName -and $_.deviceName -ne "" } |
-    Group-Object -Property deviceName, serialNumber | 
+# Find duplicates by Serial Number (ignoring empty or generic serial numbers)
+Write-Host "Checking for duplicate Serial Numbers..." -ForegroundColor Yellow
+$duplicateSerials = $devices | 
+    Where-Object { $_.serialNumber -and $_.serialNumber -ne "" -and $_.serialNumber -notmatch '^(1234567|DEFAULT|UNKNOWN|TO BE FILLED BY O.E.M.)
+ } |
+    Group-Object -Property serialNumber | 
     Where-Object { $_.Count -gt 1 }
 
-if ($combinedDuplicates) {
-    Write-Host "Found $($combinedDuplicates.Count) duplicate device name and serial number combinations!" -ForegroundColor Red
-    $combinedDuplicates | ForEach-Object {
+if ($duplicateSerials) {
+    Write-Host "Found $($duplicateSerials.Count) duplicate serial number combinations!" -ForegroundColor Red
+    $duplicateSerials | ForEach-Object {
         $firstItem = $_.Group[0]
-        Write-Host "Device Name: $($firstItem.deviceName), Serial Number: $($firstItem.serialNumber) - $($_.Count) devices" -ForegroundColor Red
+        Write-Host "Serial Number: $($firstItem.serialNumber) - $($_.Count) devices" -ForegroundColor Red
     }
     
-    # Export combined duplicates to CSV
-    $combinedDuplicateDevices = $combinedDuplicates | ForEach-Object { $_.Group } | Select-Object deviceName, serialNumber, model, manufacturer, operatingSystem, osVersion, userPrincipalName, lastSyncDateTime, enrolledDateTime, id
-    Export-CsvSafely -Data $combinedDuplicateDevices -Path "$OutputFolder\DuplicateDeviceNameAndSerial.csv" -Description "device name and serial number duplicates"
+    # Export duplicate serials to CSV
+    $duplicateSerialDevices = $duplicateSerials | ForEach-Object { $_.Group } | Select-Object deviceName, serialNumber, model, manufacturer, operatingSystem, osVersion, userPrincipalName, lastSyncDateTime, enrolledDateTime, id, complianceState
+    Export-CsvSafely -Data $duplicateSerialDevices -Path "$OutputFolder\DuplicateSerialNumbers.csv" -Description "serial number duplicates"
 } else {
-    Write-Host "No duplicate device name and serial number combinations found." -ForegroundColor Green
+    Write-Host "No duplicate serial numbers found." -ForegroundColor Green
+}
+
+# Find duplicates by Device Name (ignoring empty device names)
+Write-Host "Checking for duplicate Device Names..." -ForegroundColor Yellow
+$duplicateDeviceNames = $devices | 
+    Where-Object { $_.deviceName -and $_.deviceName -ne "" } |
+    Group-Object -Property deviceName | 
+    Where-Object { $_.Count -gt 1 }
+
+if ($duplicateDeviceNames) {
+    Write-Host "Found $($duplicateDeviceNames.Count) duplicate device name combinations!" -ForegroundColor Red
+    $duplicateDeviceNames | ForEach-Object {
+        $firstItem = $_.Group[0]
+        Write-Host "Device Name: $($firstItem.deviceName) - $($_.Count) devices" -ForegroundColor Red
+    }
+    
+    # Export duplicate device names to CSV
+    $duplicateDeviceNameDevices = $duplicateDeviceNames | ForEach-Object { $_.Group } | Select-Object deviceName, serialNumber, model, manufacturer, operatingSystem, osVersion, userPrincipalName, lastSyncDateTime, enrolledDateTime, id, complianceState
+    Export-CsvSafely -Data $duplicateDeviceNameDevices -Path "$OutputFolder\DuplicateDeviceNames.csv" -Description "device name duplicates"
+} else {
+    Write-Host "No duplicate device names found." -ForegroundColor Green
 }
 
 # Export all devices for reference
-Export-CsvSafely -Data ($devices | Select-Object deviceName, serialNumber, model, manufacturer, operatingSystem, osVersion, userPrincipalName, lastSyncDateTime, enrolledDateTime, id) -Path "$OutputFolder\AllDevices.csv" -Description "all devices"
+Export-CsvSafely -Data ($devices | Select-Object deviceName, serialNumber, model, manufacturer, operatingSystem, osVersion, userPrincipalName, lastSyncDateTime, enrolledDateTime, id, complianceState) -Path "$OutputFolder\AllDevices.csv" -Description "all devices"
 
 # Find devices with missing serial numbers
 Write-Host "Checking for devices with missing serial numbers..." -ForegroundColor Yellow
@@ -170,7 +192,7 @@ if ($noSerialDevices) {
     Write-Host "Found $noSerialCount devices with missing serial numbers!" -ForegroundColor Red
     
     # Export devices with no serial number to CSV
-    Export-CsvSafely -Data ($noSerialDevices | Select-Object deviceName, id, model, manufacturer, operatingSystem, osVersion, userPrincipalName, lastSyncDateTime, enrolledDateTime) -Path "$OutputFolder\DevicesWithNoSerialNumber.csv" -Description "devices with no serial number"
+    Export-CsvSafely -Data ($noSerialDevices | Select-Object deviceName, id, model, manufacturer, operatingSystem, osVersion, userPrincipalName, lastSyncDateTime, enrolledDateTime, complianceState) -Path "$OutputFolder\DevicesWithNoSerialNumber.csv" -Description "devices with no serial number"
 } else {
     Write-Host "No devices with missing serial numbers found." -ForegroundColor Green
 }
@@ -197,7 +219,7 @@ if ($userDevices) {
     $multiUserDevices = $userDevices | ForEach-Object { 
         $userName = $_.Name
         $_.Group | Add-Member -MemberType NoteProperty -Name "DeviceCount" -Value $_.Count -PassThru
-    } | Select-Object deviceName, serialNumber, model, manufacturer, operatingSystem, osVersion, userPrincipalName, DeviceCount, lastSyncDateTime, enrolledDateTime, id
+    } | Select-Object deviceName, serialNumber, model, manufacturer, operatingSystem, osVersion, userPrincipalName, DeviceCount, lastSyncDateTime, enrolledDateTime, id, complianceState
     
     Export-CsvSafely -Data $multiUserDevices -Path "$OutputFolder\UsersWithMultipleDevices.csv" -Description "users with multiple devices"
 } else {
@@ -207,7 +229,8 @@ if ($userDevices) {
 # Summary
 Write-Host "`n===== SUMMARY =====" -ForegroundColor Cyan
 Write-Host "Total devices: $($devices.Count)" -ForegroundColor White
-Write-Host "Devices with duplicate name and serial number: $(if ($combinedDuplicates) { $combinedDuplicates.Count } else { 0 })" -ForegroundColor White
+Write-Host "Devices with duplicate serial numbers: $(if ($duplicateSerials) { $duplicateSerials.Count } else { 0 })" -ForegroundColor White
+Write-Host "Devices with duplicate device names: $(if ($duplicateDeviceNames) { $duplicateDeviceNames.Count } else { 0 })" -ForegroundColor White
 Write-Host "Devices with missing serial numbers: $(if ($noSerialDevices) { $noSerialDevices.Count } else { 0 })" -ForegroundColor White
 Write-Host "Users with multiple devices: $(if ($userDevices) { $userDevices.Count } else { 0 })" -ForegroundColor White
 Write-Host "All reports saved to: $OutputFolder" -ForegroundColor Green
