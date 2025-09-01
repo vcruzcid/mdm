@@ -8,6 +8,9 @@ param(
     [Parameter(Mandatory=$false)]
     [string[]]$InputFiles,
 
+    [Parameter(Mandatory=$false)]
+    [string]$OutputFolder,
+
     [switch]$Retire,
     [switch]$Delete,
     [switch]$WhatIf
@@ -148,14 +151,21 @@ function Take-ActionOnDevices {
         $devices,
         $retire,
         $delete,
-        $dryRun
+        $dryRun,
+        $OutputFolder
     )
 
-    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-    $outputFolder = ".\RetireResults-$timestamp"
-    New-Item -ItemType Directory -Path $outputFolder -Force | Out-Null
+    if (-not $OutputFolder) {
+        $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+        $OutputFolder = ".\RetireResults-$timestamp"
+    }
+
+    if (-not (Test-Path -Path $OutputFolder)) {
+        New-Item -ItemType Directory -Path $OutputFolder -Force | Out-Null
+    }
+    
     $results = @()
-    $logPath = Join-Path $outputFolder 'ActionErrors.log'
+    $logPath = Join-Path $OutputFolder 'ActionErrors.log'
 
     foreach ($device in $devices) {
         $info = Get-DeviceInfo -id $device.id
@@ -188,6 +198,7 @@ function Take-ActionOnDevices {
                     $result.Status = "Success"
                 } catch {
                     $err = "Retire failed for device $($device.deviceName) (ID: $($device.id)): $_"
+                    Write-Warning $err
                     $result.Status = "Failed to Retire"
                     Add-Content -Path $logPath -Value $err
                 }
@@ -201,6 +212,7 @@ function Take-ActionOnDevices {
                     $result.Status = "Success"
                 } catch {
                     $err = "Delete failed for device $($device.deviceName) (ID: $($device.id)): $_"
+                    Write-Warning $err
                     $result.Status = "Failed to Delete"
                     Add-Content -Path $logPath -Value $err
                 }
@@ -213,8 +225,8 @@ function Take-ActionOnDevices {
         $results += $result
     }
 
-    $results | Export-Csv -Path (Join-Path $outputFolder 'Results.csv') -NoTypeInformation
-    Write-Host "Results saved to $outputFolder\Results.csv" -ForegroundColor Green
+    $results | Export-Csv -Path (Join-Path $OutputFolder 'Results.csv') -NoTypeInformation
+    Write-Host "Results saved to $OutputFolder\Results.csv" -ForegroundColor Green
     if (Test-Path $logPath) {
         Write-Host "Some actions failed. See log: $logPath" -ForegroundColor Yellow
     }
@@ -226,15 +238,27 @@ Connect-Graph
 $files = Load-InputFiles
 
 # Validate all CSV files before processing
+$validFiles = @()
 foreach ($file in $files) {
-    if (-not (Validate-CsvFile -FilePath $file)) {
-        exit 1
+    if (Validate-CsvFile -FilePath $file) {
+        $validFiles += $file
+    } else {
+        Write-Warning "Skipping invalid CSV file: $file"
     }
 }
 
+if ($validFiles.Count -eq 0) {
+    Write-Error "No valid CSV files found."
+    exit 1
+}
+
 $rawDevices = @()
-foreach ($file in $files) {
-    $rawDevices += Import-Csv $file
+foreach ($file in $validFiles) {
+    try {
+        $rawDevices += Import-Csv $file -ErrorAction Stop
+    } catch {
+        Write-Warning "Failed to import CSV file '$file': $_"
+    }
 }
 $rawDevices = $rawDevices | Sort-Object -Property deviceName -Unique
 
@@ -268,6 +292,6 @@ if (-not $WhatIf) {
     }
 }
 
-Take-ActionOnDevices -devices $preview -retire:$Retire -delete:$Delete -dryRun:(!$Retire -and !$Delete -or $WhatIf)
+Take-ActionOnDevices -devices $preview -retire:$Retire -delete:$Delete -dryRun:(!$Retire -and !$Delete -or $WhatIf) -OutputFolder $OutputFolder
 
 Disconnect-MgGraph | Out-Null

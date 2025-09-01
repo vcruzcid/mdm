@@ -5,6 +5,16 @@ All notable changes to the Intune Device Management Scripts will be documented i
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2025-08-20
+
+### Changed
+- **Set-IntuneDeviceActions.ps1**:
+  - Improved error handling to prevent the script from stopping on invalid CSV files. The script now skips invalid files and continues with valid ones.
+  - Enhanced error logging to provide more detailed output to the console when a device action fails.
+- **Get-IntuneDuplicateDevicesReport.ps1**:
+  - Changed the critical error for missing device `id` properties to a warning. The script will now skip devices with missing IDs and continue processing the rest of the data.
+  - Refactored the script to move the `Export-CsvSafely` function to the top of the script and remove a duplicate definition.
+
 ## [2.0.0] - 2024-12-01
 
 ### Added
